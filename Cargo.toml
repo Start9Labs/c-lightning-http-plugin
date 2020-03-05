@@ -7,6 +7,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hyper = "0.13.2"
-tokio = { features = ["full"], version = "0.2.13" }
-lazy_async_pool = "0.2.1"
+hyper = { version = "0.13.2", features = ["stream"] }
+tokio = { version = "0.2.13", features = ["full"] }
+lazy_async_pool = "0.3.0"
+futures = { version = "0.3.4", features = ["async-await"] }
+failure = "0.1.6"
+lazy_static = "1.4.0"
