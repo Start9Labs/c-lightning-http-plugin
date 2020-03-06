@@ -57,7 +57,7 @@ async fn handle<
         _ => Response::builder()
             .header("Content-Type", "application/json")
             .status(hyper::StatusCode::METHOD_NOT_ALLOWED)
-            .body(Body::from("{\"error\":\"Method Not Allowed\"}"))
+            .body(Body::from("{\"id\":null,\"jsonrpc\":\"2.0\",\"error\":{\"code\":4,\"message\":\"Method Not Allowed\"}}"))
             .map_err(Error::from),
     }
 }

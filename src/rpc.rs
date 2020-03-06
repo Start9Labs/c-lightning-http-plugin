@@ -127,9 +127,18 @@ pub fn handle_stdio_rpc(send_side: Sender<PathBuf>) {
                             data: Some(Value::String(format!("{}", e))),
                         }),
                     },
-                    "getmanifest" => {
-                        RpcResult::Result(serde_json::json!(include!("manifest.json")))
-                    }
+                    "getmanifest" => RpcResult::Result(serde_json::json!({
+                        "options": [],
+                        "rpcmethods": [],
+                        "subscriptions": [],
+                        "hooks": [],
+                        "features": {
+                            "node": "00000000",
+                            "init": "00000000",
+                            "invoice": "00000000"
+                        },
+                        "dynamic": true
+                    })),
                     other => RpcResult::Error(RpcError {
                         code: serde_json::Number::from(2),
                         message: "unknown method",
