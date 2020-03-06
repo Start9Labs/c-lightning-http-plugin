@@ -63,7 +63,7 @@ impl AsRef<RpcReq> for RpcReq {
     }
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct RpcRes {
     pub id: JsonRpcV2Id,
     pub jsonrpc: JsonRpcV2,
@@ -71,7 +71,7 @@ pub struct RpcRes {
     pub result: RpcResult,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RpcResult {
     Result(Value),
@@ -94,7 +94,7 @@ impl From<RpcResult> for Result<Value, RpcError> {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct RpcError {
     pub code: serde_json::Number,
-    pub message: String,
+    pub message: &'static str,
     #[serde(
         default,
         deserialize_with = "deserialize_some",
@@ -112,9 +112,9 @@ pub fn handle_stdio_rpc(send_side: Sender<PathBuf>) {
         let rpc_result = match e_req {
             Ok(RpcReq {
                 id: Some(req_id),
-                jsonrpc: _,
-                method: method,
-                params: params,
+                method,
+                params,
+                ..
             }) => RpcRes {
                 id: req_id,
                 jsonrpc: Default::default(),
@@ -122,8 +122,8 @@ pub fn handle_stdio_rpc(send_side: Sender<PathBuf>) {
                     "init" => match init(send_side.clone(), params) {
                         Ok(_) => RpcResult::Result(serde_json::json!({})),
                         Err(e) => RpcResult::Error(RpcError {
-                            code: todo!(),
-                            message: todo!(),
+                            code: serde_json::Number::from(1),
+                            message: "error processing init",
                             data: Some(Value::String(format!("{}", e))),
                         }),
                     },
@@ -131,31 +131,27 @@ pub fn handle_stdio_rpc(send_side: Sender<PathBuf>) {
                         RpcResult::Result(serde_json::json!(include!("manifest.json")))
                     }
                     other => RpcResult::Error(RpcError {
-                        code: todo!(),
-                        message: todo!(),
+                        code: serde_json::Number::from(2),
+                        message: "unknown method",
                         data: Some(Value::String(format!("{}", other.to_owned()))),
                     }),
                 },
             },
-            Ok(RpcReq {
-                id: None,
-                jsonrpc: _,
-                method: method,
-                params: params,
-            }) => {
+            Ok(RpcReq { id: None, .. }) => {
                 continue;
             }
             Err(e) => RpcRes {
                 id: JsonRpcV2Id::Null,
                 jsonrpc: JsonRpcV2,
                 result: RpcResult::Error(RpcError {
-                    code: todo!(),
-                    message: todo!(),
+                    code: serde_json::Number::from(3),
+                    message: "parse error",
                     data: Some(Value::String(format!("{}", e))),
                 }),
             },
         };
-        serde_json::to_writer(std::io::stdout(), &rpc_result);
+        serde_json::to_writer(std::io::stdout(), &rpc_result)
+            .unwrap_or_else(|e| eprintln!("error writing rpc response: {}", e));
         print!("\n\n");
     }
 }
@@ -163,9 +159,11 @@ pub fn handle_stdio_rpc(send_side: Sender<PathBuf>) {
 fn init(send_side: Sender<PathBuf>, mut conf: Vec<Value>) -> Result<(), failure::Error> {
     let arg0 = conf
         .pop()
-        .ok_or(failure::format_err!("No arguments supplied"))?;
+        .ok_or(failure::format_err!("no arguments supplied"))?;
     let conf: LightningConfig = serde_json::from_value(arg0)?;
-    send_side.send(conf.lightning_dir.join(conf.rpc_file));
+    send_side
+        .send(conf.lightning_dir.join(conf.rpc_file))
+        .unwrap_or_default(); // ignore send error: means the reciever has already received and been dropped
     Ok(())
 }
 
