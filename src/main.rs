@@ -17,6 +17,15 @@ use tokio::io::AsyncRead;
 use tokio::io::Result as TokioResult;
 use tokio::net::UnixStream;
 
+use crate::lightning_socket::LightningSocketArc;
+
+mod lightning_socket;
+mod rpc;
+
+// TODO: implement init
+// TODO: implement getmanifest
+//
+
 type BoxedByteStream = Box<
     dyn futures::Stream<Item = Result<Bytes, Box<dyn std::error::Error + 'static + Sync + Send>>>
         + 'static
@@ -144,7 +153,16 @@ async fn main() {
     // Construct our SocketAddr to listen on...
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 
-    let pool = Pool::new(0, || UnixStream::connect("TODO").boxed());
+    let (send_side, recv_side) = crossbeam_channel::bounded(1);
+
+    // fork thread for stdio
+    let lightning_socket_fut = LightningSocketArc::new(recv_side);
+
+    let pool = Pool::new(0, move || {
+        let lightning_socket_fut = lightning_socket_fut.clone();
+        async move { UnixStream::connect(&*lightning_socket_fut.wait_for_path().await).await }
+            .boxed()
+    });
     // And a MakeService to handle each connection...
     let handler = move |req| handle((&pool).clone(), req);
     let make_service = make_service_fn(|_conn| {
@@ -154,6 +172,10 @@ async fn main() {
 
     // Then bind and serve...
     let server = Server::bind(&addr).serve(make_service);
+
+    std::thread::spawn(move || {
+        crate::rpc::handle_stdio_rpc(send_side);
+    });
 
     // And run forever...
     if let Err(e) = server.await {
