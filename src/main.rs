@@ -10,7 +10,7 @@ use hyper::{Body, Method, Request, Response, Server};
 use lazy_async_pool::Pool;
 use tokio::net::UnixStream;
 
-use crate::async_io::RPCResponseStream;
+use crate::async_io::RpcResponseStream;
 use crate::async_io::TokioCompatAsyncRead;
 use crate::lightning_socket::LightningSocketArc;
 
@@ -46,7 +46,7 @@ async fn handle<
             )
             .await?;
             let res: BoxedByteStream = Box::new(
-                RPCResponseStream::new(ustream)
+                RpcResponseStream::new(ustream)
                     .map_err(|e| -> Box<dyn std::error::Error + 'static + Sync + Send> {
                         Box::new(e)
                     })

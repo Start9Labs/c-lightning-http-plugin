@@ -24,30 +24,30 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RPCResponseState {
+pub enum RpcResponseState {
     NoNewLines,
     OneNewLine,
     TwoNewLines,
 }
 
 /// A byte stream that terminates when 2 consecutive newlines are received
-pub struct RPCResponseStream<SP: DerefMut<Target = AR>, AR: AsyncRead> {
+pub struct RpcResponseStream<SP: DerefMut<Target = AR>, AR: AsyncRead> {
     pub inner: SP,
-    pub state: RPCResponseState,
+    pub state: RpcResponseState,
 }
-impl<SP, AR> RPCResponseStream<SP, AR>
+impl<SP, AR> RpcResponseStream<SP, AR>
 where
     SP: DerefMut<Target = AR>,
     AR: AsyncRead,
 {
     pub fn new(sp: SP) -> Self {
-        RPCResponseStream {
+        RpcResponseStream {
             inner: sp,
-            state: RPCResponseState::NoNewLines,
+            state: RpcResponseState::NoNewLines,
         }
     }
 }
-impl<SP, AR> Stream for RPCResponseStream<SP, AR>
+impl<SP, AR> Stream for RpcResponseStream<SP, AR>
 where
     SP: DerefMut<Target = AR> + std::marker::Unpin,
     AR: AsyncRead + std::marker::Unpin,
@@ -55,7 +55,7 @@ where
     type Item = Result<Bytes, tokio::io::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        if self.state == RPCResponseState::TwoNewLines {
+        if self.state == RpcResponseState::TwoNewLines {
             return Poll::Ready(None);
         }
         let mut buf = vec![0; 4096];
@@ -67,13 +67,13 @@ where
             Poll::Ready(Ok(n)) => {
                 buf.truncate(n);
                 if buf.ends_with(b"\n\n")
-                    || (*state == RPCResponseState::OneNewLine && buf.starts_with(b"\n"))
+                    || (*state == RpcResponseState::OneNewLine && buf.starts_with(b"\n"))
                 {
-                    *state = RPCResponseState::TwoNewLines;
+                    *state = RpcResponseState::TwoNewLines;
                 } else if buf.ends_with(b"\n") {
-                    self.state = RPCResponseState::OneNewLine;
+                    self.state = RpcResponseState::OneNewLine;
                 } else {
-                    self.state = RPCResponseState::NoNewLines;
+                    self.state = RpcResponseState::NoNewLines;
                 }
                 Poll::Ready(Some(Ok(Bytes::from(buf))))
             }
