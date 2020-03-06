@@ -8,6 +8,7 @@ use hyper::body::Bytes;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server};
 use lazy_async_pool::Pool;
+use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 
 use crate::async_io::RpcResponseStream;
@@ -25,7 +26,7 @@ type BoxedByteStream = Box<
         + Send,
 >;
 
-async fn handle<
+async fn handle_inner<
     F: Fn() -> U + Send + Sync + 'static,
     U: Future<Output = Result<UnixStream, E>> + Unpin + 'static,
     E: std::error::Error + Send + Sync + 'static,
@@ -45,20 +46,48 @@ async fn handle<
                 &mut *ustream,
             )
             .await?;
+            ustream.write_all(b"\n\n").await?;
+            let stream = RpcResponseStream::new(ustream)
+            .map_err(|e| -> Box<dyn std::error::Error + 'static + Sync + Send> {
+                Box::new(e)
+            })
+            .into_stream();
             let res: BoxedByteStream = Box::new(
-                RpcResponseStream::new(ustream)
-                    .map_err(|e| -> Box<dyn std::error::Error + 'static + Sync + Send> {
-                        Box::new(e)
-                    })
-                    .into_stream(),
+                stream,
             );
-            Ok(Response::new(Body::from(res)))
+            Response::builder().header("Content-Type", "application/json").body(Body::from(res)).map_err(Error::from)
         }
         _ => Response::builder()
             .header("Content-Type", "application/json")
             .status(hyper::StatusCode::METHOD_NOT_ALLOWED)
             .body(Body::from("{\"id\":null,\"jsonrpc\":\"2.0\",\"error\":{\"code\":4,\"message\":\"Method Not Allowed\"}}"))
             .map_err(Error::from),
+    }
+}
+
+async fn handle<
+    F: Fn() -> U + Send + Sync + 'static,
+    U: Future<Output = Result<UnixStream, E>> + Unpin + 'static,
+    E: std::error::Error + Send + Sync + 'static,
+>(
+    pool: Pool<UnixStream, F, U, E>,
+    req: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    match handle_inner(pool, req).await {
+        Err(e) => Response::builder()
+            .header("Content-Type", "application/json")
+            .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from(serde_json::to_string(&crate::rpc::RpcRes {
+                id: crate::rpc::JsonRpcV2Id::Null,
+                jsonrpc: Default::default(),
+                result: crate::rpc::RpcResult::Error(crate::rpc::RpcError {
+                    code: serde_json::Number::from(5),
+                    message: "internal server error",
+                    data: Some(serde_json::Value::String(format!("{}", e))),
+                }),
+            })?))
+            .map_err(Error::from),
+        a => a,
     }
 }
 

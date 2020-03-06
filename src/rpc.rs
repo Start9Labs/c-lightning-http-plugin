@@ -49,13 +49,20 @@ impl<'de> serde::Deserialize<'de> for JsonRpcV2 {
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(untagged)]
+pub enum RpcParams {
+    ByPosition(Vec<Value>),
+    ByName(serde_json::Map<String, Value>),
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct RpcReq {
     #[serde(default, deserialize_with = "deserialize_some")]
     pub id: Option<JsonRpcV2Id>,
     #[serde(default)]
     pub jsonrpc: JsonRpcV2,
     pub method: String,
-    pub params: Vec<Value>,
+    pub params: RpcParams,
 }
 impl AsRef<RpcReq> for RpcReq {
     fn as_ref(&self) -> &RpcReq {
@@ -165,10 +172,13 @@ pub fn handle_stdio_rpc(send_side: Sender<PathBuf>) {
     }
 }
 
-fn init(send_side: Sender<PathBuf>, mut conf: Vec<Value>) -> Result<(), failure::Error> {
-    let arg0 = conf
-        .pop()
-        .ok_or(failure::format_err!("no arguments supplied"))?;
+fn init(send_side: Sender<PathBuf>, conf: RpcParams) -> Result<(), failure::Error> {
+    let arg0 = match conf {
+        RpcParams::ByPosition(mut a) => a
+            .pop()
+            .ok_or(failure::format_err!("no arguments supplied"))?,
+        RpcParams::ByName(a) => serde_json::Value::Object(a),
+    };
     let conf: LightningConfig = serde_json::from_value(arg0)?;
     send_side
         .send(conf.lightning_dir.join(conf.rpc_file))
@@ -187,9 +197,20 @@ impl<'de> serde::Deserialize<'de> for LightningConfig {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         #[derive(serde::Deserialize)]
         struct Complete {
-            configuration: LightningConfig,
+            configuration: LightningConfigDefault,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        pub struct LightningConfigDefault {
+            lightning_dir: PathBuf,
+            rpc_file: String,
+            startup: bool,
         }
         let complete = Complete::deserialize(d)?;
-        Ok(complete.configuration)
+        Ok(LightningConfig {
+            lightning_dir: complete.configuration.lightning_dir,
+            rpc_file: complete.configuration.rpc_file,
+            startup: complete.configuration.startup,
+        })
     }
 }
