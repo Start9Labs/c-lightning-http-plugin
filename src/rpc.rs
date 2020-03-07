@@ -112,21 +112,10 @@ pub struct RpcError {
     pub data: Option<Value>,
 }
 
-pub struct StdErrWrapper(std::io::Stdin);
-impl std::io::Read for StdErrWrapper {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        use std::io::Write;
-        let n = self.0.read(buf)?;
-        std::io::stderr().write_all(&buf[..n])?;
-        std::io::stderr().flush()?;
-        Ok(n)
-    }
-}
-
 pub fn handle_stdio_rpc(send_side: Sender<InitInfo>) {
     // create serde stream
     let req_stream: StreamDeserializer<_, RpcReq> =
-        StreamDeserializer::new(serde_json::de::IoRead::new(StdErrWrapper(std::io::stdin())));
+        StreamDeserializer::new(serde_json::de::IoRead::new(std::io::stdin()));
     // for request in stream
     for e_req in req_stream {
         let rpc_result = match e_req {
