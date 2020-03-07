@@ -13,10 +13,10 @@ use tokio::net::UnixStream;
 
 use crate::async_io::RpcResponseStream;
 use crate::async_io::TokioCompatAsyncRead;
-use crate::lightning_socket::LightningSocketArc;
+use crate::init_info::InitInfoArc;
 
 mod async_io;
-mod lightning_socket;
+mod init_info;
 mod rpc;
 
 type BoxedByteStream = Box<
@@ -26,16 +26,36 @@ type BoxedByteStream = Box<
         + Send,
 >;
 
+async fn handle_auth(
+    init_info_fut: InitInfoArc,
+    auth: Option<&hyper::header::HeaderValue>,
+) -> bool {
+    if let (Some(received), Some(expected)) =
+        (auth, &init_info_fut.wait_for_info().await.auth_header)
+    {
+        received == expected
+    } else {
+        false
+    }
+}
+
 async fn handle_inner<
     F: Fn() -> U + Send + Sync + 'static,
     U: Future<Output = Result<UnixStream, E>> + Unpin + 'static,
     E: std::error::Error + Send + Sync + 'static,
 >(
     pool: Pool<UnixStream, F, U, E>,
+    init_info_fut: InitInfoArc,
     req: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     match req.method() {
         &Method::POST => {
+            if !handle_auth(init_info_fut, req.headers().get("Authorization")).await {
+                return Response::builder().header("Content-Type", "application/json")
+                    .status(hyper::StatusCode::UNAUTHORIZED)
+                    .body(Body::from("{\"id\":null,\"jsonrpc\":\"2.0\",\"error\":{\"code\":5,\"message\":\"Unauthorized\"}}"))
+                    .map_err(Error::from);
+            }
             let mut ustream = pool.get().await?;
             let body = req.into_body();
             tokio::io::copy(
@@ -71,9 +91,10 @@ async fn handle<
     E: std::error::Error + Send + Sync + 'static,
 >(
     pool: Pool<UnixStream, F, U, E>,
+    init_info_fut: InitInfoArc,
     req: Request<Body>,
 ) -> Result<Response<Body>, Error> {
-    match handle_inner(pool, req).await {
+    match handle_inner(pool, init_info_fut, req).await {
         Err(e) => Response::builder()
             .header("Content-Type", "application/json")
             .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
@@ -81,7 +102,7 @@ async fn handle<
                 id: crate::rpc::JsonRpcV2Id::Null,
                 jsonrpc: Default::default(),
                 result: crate::rpc::RpcResult::Error(crate::rpc::RpcError {
-                    code: serde_json::Number::from(5),
+                    code: serde_json::Number::from(0),
                     message: "internal server error",
                     data: Some(serde_json::Value::String(format!("{}", e))),
                 }),
@@ -94,31 +115,35 @@ async fn handle<
 #[tokio::main]
 async fn main() {
     // Construct our SocketAddr to listen on...
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-
     let (send_side, recv_side) = crossbeam_channel::bounded(1);
 
-    // fork thread for stdio
-    let lightning_socket_fut = LightningSocketArc::new(recv_side);
+    std::thread::spawn(move || {
+        crate::rpc::handle_stdio_rpc(send_side);
+    });
 
+    // fork thread for stdio
+    let init_info_fut = InitInfoArc::new(recv_side);
+
+    let init_info_fut_cap = init_info_fut.clone();
     let pool = Pool::new(0, move || {
-        let lightning_socket_fut = lightning_socket_fut.clone();
-        async move { UnixStream::connect(&*lightning_socket_fut.wait_for_path().await).await }
+        let init_info_fut = init_info_fut_cap.clone();
+        async move { UnixStream::connect(&*init_info_fut.wait_for_info().await.socket_path).await }
             .boxed()
     });
     // And a MakeService to handle each connection...
-    let handler = move |req| handle((&pool).clone(), req);
+    let init_info_fut_cap = init_info_fut.clone();
+    let handler = move |req| handle((&pool).clone(), init_info_fut_cap.clone(), req);
     let make_service = make_service_fn(|_conn| {
         let handler = handler.clone();
         futures::future::ok::<_, Error>(service_fn(handler))
     });
 
-    // Then bind and serve...
-    let server = Server::bind(&addr).serve(make_service);
+    let port = init_info_fut.wait_for_info().await.http_port;
 
-    std::thread::spawn(move || {
-        crate::rpc::handle_stdio_rpc(send_side);
-    });
+    // Then bind and serve...
+    let server = Server::bind(&SocketAddr::from(([127, 0, 0, 1], port))).serve(make_service);
+
+    eprintln!("Serving RPC on port {}", port);
 
     // And run forever...
     if let Err(e) = server.await {

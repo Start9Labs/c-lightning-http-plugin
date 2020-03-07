@@ -4,6 +4,8 @@ use crossbeam_channel::Sender;
 use serde_json::StreamDeserializer;
 use serde_json::Value;
 
+use crate::init_info::InitInfo;
+
 fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     T: serde::Deserialize<'de>,
@@ -110,10 +112,21 @@ pub struct RpcError {
     pub data: Option<Value>,
 }
 
-pub fn handle_stdio_rpc(send_side: Sender<PathBuf>) {
+pub struct StdErrWrapper(std::io::Stdin);
+impl std::io::Read for StdErrWrapper {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use std::io::Write;
+        let n = self.0.read(buf)?;
+        std::io::stderr().write_all(&buf[..n])?;
+        std::io::stderr().flush()?;
+        Ok(n)
+    }
+}
+
+pub fn handle_stdio_rpc(send_side: Sender<InitInfo>) {
     // create serde stream
     let req_stream: StreamDeserializer<_, RpcReq> =
-        StreamDeserializer::new(serde_json::de::IoRead::new(std::io::stdin()));
+        StreamDeserializer::new(serde_json::de::IoRead::new(StdErrWrapper(std::io::stdin())));
     // for request in stream
     for e_req in req_stream {
         let rpc_result = match e_req {
@@ -135,7 +148,26 @@ pub fn handle_stdio_rpc(send_side: Sender<PathBuf>) {
                         }),
                     },
                     "getmanifest" => RpcResult::Result(serde_json::json!({
-                        "options": [],
+                        "options": [
+                            {
+                                "name": "http-user",
+                                "type": "string",
+                                "default": "lightning",
+                                "description": "Basic-Auth user header for http authentication"
+                            },
+                            {
+                                "name": "http-pass",
+                                "type": "string",
+                                "default": "",
+                                "description": "Basic-Auth password header for http authentication, not setting this will result in requests being rejected"
+                            },
+                            {
+                                "name": "http-port",
+                                "type": "int",
+                                "default": 8080,
+                                "description": "Http port for web server listening"
+                            }
+                        ],
                         "rpcmethods": [],
                         "subscriptions": [],
                         "hooks": [],
@@ -168,49 +200,100 @@ pub fn handle_stdio_rpc(send_side: Sender<PathBuf>) {
         };
         serde_json::to_writer(std::io::stdout(), &rpc_result)
             .unwrap_or_else(|e| eprintln!("error writing rpc response: {}", e));
+        match rpc_result.result {
+            RpcResult::Error(e) => eprintln!("{:?}", e),
+            _ => (),
+        };
         print!("\n\n");
     }
 }
 
-fn init(send_side: Sender<PathBuf>, conf: RpcParams) -> Result<(), failure::Error> {
+fn init(send_side: Sender<InitInfo>, conf: RpcParams) -> Result<(), failure::Error> {
     let arg0 = match conf {
         RpcParams::ByPosition(mut a) => a
             .pop()
             .ok_or(failure::format_err!("no arguments supplied"))?,
         RpcParams::ByName(a) => serde_json::Value::Object(a),
     };
-    let conf: LightningConfig = serde_json::from_value(arg0)?;
+    let conf: LightningInit = serde_json::from_value(arg0)?;
     send_side
-        .send(conf.lightning_dir.join(conf.rpc_file))
-        .unwrap_or_default(); // ignore send error: means the reciever has already received and been dropped
+        .send(conf.into())
+        .unwrap_or_else(|e| eprintln!("SEND ERROR: {}", e)); // ignore send error: means the reciever has already received and been dropped
     Ok(())
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LightningInit {
+    options: LightningOptions,
+    configuration: LightningConfig,
+}
+
+impl From<LightningInit> for InitInfo {
+    fn from(li: LightningInit) -> Self {
+        InitInfo {
+            socket_path: li
+                .configuration
+                .lightning_dir
+                .join(li.configuration.rpc_file),
+            auth_header: if li.options.http_pass.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "Basic {}",
+                    base64::encode(&format!(
+                        "{}:{}",
+                        li.options.http_user, li.options.http_pass
+                    ))
+                ))
+            },
+            http_port: li.options.http_port,
+        }
+    }
+}
+
+fn default_user() -> String {
+    "lightning".to_owned()
+}
+
+fn default_pass() -> String {
+    "".to_owned()
+}
+
+fn default_port() -> u16 {
+    8080
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LightningOptions {
+    #[serde(default = "default_user")]
+    http_user: String,
+    #[serde(default = "default_pass")]
+    http_pass: String,
+    #[serde(default = "default_port")]
+    #[serde(deserialize_with = "deser_str_num")]
+    http_port: u16,
+}
+
+fn deser_str_num<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u16, D::Error> {
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum StrNum {
+        Str(String),
+        Num(u16),
+    }
+    let sn: StrNum = serde::Deserialize::deserialize(deserializer)?;
+    Ok(match sn {
+        StrNum::Str(s) => s.parse().map_err(|e| serde::de::Error::custom(e))?,
+        StrNum::Num(n) => n,
+    })
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct LightningConfig {
     lightning_dir: PathBuf,
     rpc_file: String,
     startup: bool,
-}
-
-impl<'de> serde::Deserialize<'de> for LightningConfig {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Complete {
-            configuration: LightningConfigDefault,
-        }
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "kebab-case")]
-        pub struct LightningConfigDefault {
-            lightning_dir: PathBuf,
-            rpc_file: String,
-            startup: bool,
-        }
-        let complete = Complete::deserialize(d)?;
-        Ok(LightningConfig {
-            lightning_dir: complete.configuration.lightning_dir,
-            rpc_file: complete.configuration.rpc_file,
-            startup: complete.configuration.startup,
-        })
-    }
 }
