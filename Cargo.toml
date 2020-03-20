@@ -1,13 +1,18 @@
 [package]
 name = "c-lightning-http-plugin"
 version = "0.1.0"
-authors = ["Keagan McClelland <keagan@helix.local>"]
+authors = ["Keagan McClelland <keagan@start9labs.com>", "Aiden McClelland <me@drbonez.dev>"]
 edition = "2018"
+description = "A plugin for c-lightning that proxies http rpc traffic to the unix domain socket."
+license = "MIT"
+repository = "https://github.com/Start9Labs/c-lightning-http-plugin"
+documentation = "http://docs.rs/c-lightning-http-plugin"
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-base64 = "0.11.0"
+base64 = "0.12.0"
 crossbeam-channel = "0.4.2"
 failure = "0.1.7"
 futures = { version = "0.3.4", features = ["async-await"] }
