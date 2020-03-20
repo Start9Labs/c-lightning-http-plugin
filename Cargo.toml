@@ -6,7 +6,7 @@ edition = "2018"
 description = "A plugin for c-lightning that proxies http rpc traffic to the unix domain socket."
 license = "MIT"
 repository = "https://github.com/Start9Labs/c-lightning-http-plugin"
-documentation = "http://docs.rs/c-lightning-http-plugin"
+documentation = "https://docs.rs/c-lightning-http-plugin"
 readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
