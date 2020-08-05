@@ -7,7 +7,7 @@ use futures::TryStreamExt;
 use hyper::body::Bytes;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server};
-use lazy_async_pool::Pool;
+use lazy_async_pool::{Pool, PoolGuard};
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 
@@ -22,7 +22,6 @@ mod rpc;
 type BoxedByteStream = Box<
     dyn futures::Stream<Item = Result<Bytes, Box<dyn std::error::Error + 'static + Sync + Send>>>
         + 'static
-        + Sync
         + Send,
 >;
 
@@ -58,6 +57,7 @@ async fn handle_inner<
             }
             let mut ustream = pool.get().await?;
             let body = req.into_body();
+            ustream.mark_dirty();
             tokio::io::copy(
                 &mut TokioCompatAsyncRead(
                     body.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
@@ -67,7 +67,7 @@ async fn handle_inner<
             )
             .await?;
             ustream.write_all(b"\n\n").await?;
-            let stream = RpcResponseStream::new(ustream)
+            let stream = RpcResponseStream::new(ustream, Some(|s: &mut PoolGuard<UnixStream, _, _, _>| s.mark_clean()))
             .map_err(|e| -> Box<dyn std::error::Error + 'static + Sync + Send> {
                 Box::new(e)
             })
@@ -103,7 +103,7 @@ async fn handle<
                 jsonrpc: Default::default(),
                 result: crate::rpc::RpcResult::Error(crate::rpc::RpcError {
                     code: serde_json::Number::from(0),
-                    message: "internal server error",
+                    message: "Internal Server Error",
                     data: Some(serde_json::Value::String(format!("{}", e))),
                 }),
             })?))
