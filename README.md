@@ -8,7 +8,7 @@ This is a direct proxy for the unix domain socket from the HTTP interface
 - `http-user`
     - user name to use for Basic Auth
     - default: `lightning`
-- `http-password`
+- `http-pass`
     - password to use for Basic Auth
     - REQUIRED. All requests will be unauthorized if not supplied
 - `http-port`

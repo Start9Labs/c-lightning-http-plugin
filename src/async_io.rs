@@ -31,34 +31,41 @@ pub enum RpcResponseState {
 }
 
 /// A byte stream that terminates when 2 consecutive newlines are received
-pub struct RpcResponseStream<SP: DerefMut<Target = AR>, AR: AsyncRead> {
+pub struct RpcResponseStream<SP: DerefMut<Target = AR>, AR: AsyncRead, F: FnOnce(&mut SP) -> ()> {
     pub inner: SP,
     pub state: RpcResponseState,
     pub buf: [u8; 4096],
+    pub finalizer: Option<F>,
 }
-impl<SP, AR> RpcResponseStream<SP, AR>
+impl<SP, AR, F> RpcResponseStream<SP, AR, F>
 where
     SP: DerefMut<Target = AR>,
     AR: AsyncRead,
+    F: FnOnce(&mut SP) -> (),
 {
-    pub fn new(sp: SP) -> Self {
+    pub fn new(sp: SP, finalizer: Option<F>) -> Self {
         RpcResponseStream {
             inner: sp,
             state: RpcResponseState::NoNewLines,
             buf: [0; 4096],
+            finalizer,
         }
     }
 }
-impl<SP, AR> Stream for RpcResponseStream<SP, AR>
+impl<SP, AR, F> Stream for RpcResponseStream<SP, AR, F>
 where
     SP: DerefMut<Target = AR> + std::marker::Unpin,
     AR: AsyncRead + std::marker::Unpin,
+    F: FnOnce(&mut SP) -> () + std::marker::Unpin,
 {
     type Item = Result<Bytes, tokio::io::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let mut buf = self.buf;
         if self.state == RpcResponseState::TwoNewLines {
+            if let Some(finalizer) = self.finalizer.take() {
+                finalizer(&mut self.inner);
+            }
             return Poll::Ready(None);
         }
         let inner_pin: Pin<&mut AR> = Pin::new(self.inner.deref_mut());
