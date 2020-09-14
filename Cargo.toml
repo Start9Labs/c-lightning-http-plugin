@@ -1,6 +1,6 @@
 [package]
 name = "c-lightning-http-plugin"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Keagan McClelland <keagan@start9labs.com>", "Aiden McClelland <me@drbonez.dev>"]
 edition = "2018"
 description = "A plugin for c-lightning that proxies http rpc traffic to the unix domain socket."
