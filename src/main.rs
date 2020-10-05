@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::net::SocketAddr;
 
 use failure::Error;
 use futures::FutureExt;
@@ -138,12 +137,12 @@ async fn main() {
         futures::future::ok::<_, Error>(service_fn(handler))
     });
 
-    let port = init_info_fut.wait_for_info().await.http_port;
+    let bind = init_info_fut.wait_for_info().await.http_bind;
 
     // Then bind and serve...
-    let server = Server::bind(&SocketAddr::from(([127, 0, 0, 1], port))).serve(make_service);
+    let server = Server::bind(&bind).serve(make_service);
 
-    eprintln!("Serving RPC on port {}", port);
+    eprintln!("Serving RPC on {}", bind);
 
     // And run forever...
     if let Err(e) = server.await {

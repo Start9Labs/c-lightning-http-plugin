@@ -1,6 +1,6 @@
 [package]
 name = "c-lightning-http-plugin"
-version = "0.1.2"
+version = "0.2.0"
 authors = ["Keagan McClelland <keagan@start9labs.com>", "Aiden McClelland <me@drbonez.dev>"]
 edition = "2018"
 description = "A plugin for c-lightning that proxies http rpc traffic to the unix domain socket."
@@ -13,10 +13,10 @@ readme = "README.md"
 
 [dependencies]
 base64 = "0.12.3"
-crossbeam-channel = "0.4.3"
+crossbeam-channel = "0.4.4"
 failure = "0.1.8"
 futures = { version = "0.3.5", features = ["async-await"] }
-hyper = { version = "0.13.7", features = ["stream"] }
+hyper = { version = "0.13.8", features = ["stream"] }
 lazy_async_pool = "0.3.3"
 lazy_static = "1.4.0"
 serde = { version = "1.0", features = ["derive"] }

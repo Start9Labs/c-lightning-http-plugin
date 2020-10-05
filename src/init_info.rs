@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -8,7 +9,7 @@ use tokio::sync::RwLock;
 pub struct InitInfo {
     pub socket_path: PathBuf,
     pub auth_header: Option<String>,
-    pub http_port: u16,
+    pub http_bind: SocketAddr,
 }
 
 #[derive(Clone, Debug)]
