@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use crossbeam_channel::Sender;
@@ -151,10 +152,10 @@ pub fn handle_stdio_rpc(send_side: Sender<InitInfo>) {
                                 "description": "Basic-Auth password header for http authentication, not setting this will result in requests being rejected"
                             },
                             {
-                                "name": "http-port",
-                                "type": "int",
-                                "default": 8080,
-                                "description": "Http port for web server listening"
+                                "name": "http-bind",
+                                "type": "string",
+                                "default": "127.0.0.1:8080",
+                                "description": "IP and Port for web server to bind to"
                             }
                         ],
                         "rpcmethods": [],
@@ -236,7 +237,7 @@ impl From<LightningInit> for InitInfo {
                     ))
                 ))
             },
-            http_port: li.options.http_port,
+            http_bind: li.options.http_bind,
         }
     }
 }
@@ -249,8 +250,8 @@ fn default_pass() -> String {
     "".to_owned()
 }
 
-fn default_port() -> u16 {
-    8080
+fn default_bind() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 8080))
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -260,23 +261,8 @@ pub struct LightningOptions {
     http_user: String,
     #[serde(default = "default_pass")]
     http_pass: String,
-    #[serde(default = "default_port")]
-    #[serde(deserialize_with = "deser_str_num")]
-    http_port: u16,
-}
-
-fn deser_str_num<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u16, D::Error> {
-    #[derive(serde::Deserialize)]
-    #[serde(untagged)]
-    enum StrNum {
-        Str(String),
-        Num(u16),
-    }
-    let sn: StrNum = serde::Deserialize::deserialize(deserializer)?;
-    Ok(match sn {
-        StrNum::Str(s) => s.parse().map_err(|e| serde::de::Error::custom(e))?,
-        StrNum::Num(n) => n,
-    })
+    #[serde(default = "default_bind")]
+    http_bind: SocketAddr,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
