@@ -11,7 +11,7 @@ This is a direct proxy for the unix domain socket from the HTTP interface
 - `http-pass`
     - password to use for Basic Auth
     - REQUIRED. All requests will be unauthorized if not supplied
-- `http-port`
-    - port to bind the rpc server to
-    - default: `8080`
+- `http-bind`
+    - IP and port to bind the rpc server to
+    - default: `127.0.0.1:8080`
 
